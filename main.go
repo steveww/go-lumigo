@@ -5,14 +5,28 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/redis/go-redis/v9"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
+	"go.opentelemetry.io/otel/trace"
+)
+
+const (
+	LUMIGO = "ga-otlp.lumigo-tracer-edge.golumigo.com"
 )
 
 var (
-	rdb *redis.Client
+	rdb    *redis.Client
+	tracer trace.Tracer
 )
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -120,11 +134,52 @@ func redisConnect() {
 	}
 }
 
+func appResource() *resource.Resource {
+	return resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName("go-lumigo"),
+	)
+}
+
+func startTracer(token string) error {
+	lumigoToken := fmt.Sprintf("LumigoToken %s", token)
+	ctx := context.Background()
+	options := []otlptracehttp.Option{
+		otlptracehttp.WithEndpoint(LUMIGO),
+		otlptracehttp.WithHeaders(map[string]string{"Authorization": lumigoToken}),
+	}
+
+	client := otlptracehttp.NewClient(options...)
+	exporter, err := otlptrace.New(ctx, client)
+	if err != nil {
+		return fmt.Errorf("error creating exporter %v", err)
+	}
+
+	traceProvider := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(appResource()),
+	)
+	otel.SetTracerProvider(traceProvider)
+	tracer = traceProvider.Tracer("tracer")
+
+	return nil
+}
+
 func main() {
 	fmt.Println("Starting")
+	token, flag := os.LookupEnv("LUMIGO_TOKEN")
+	if !flag || token == "" {
+		log.Println("LUMIGO_TOKEN not set. Traces will not be received")
+	}
+
 	redisConnect()
+	err := startTracer(token)
+	if err != nil {
+		log.Println("Faied to start tracer. You are flying blind. Good luck")
+	}
 
 	r := mux.NewRouter()
+	r.Use(otelmux.Middleware("go-lumigo"))
 	r.HandleFunc("/", handleHome)
 	r.HandleFunc("/health", handleHealth)
 	r.HandleFunc("/add/{key}/{value}", handleAdd)
@@ -132,6 +187,6 @@ func main() {
 	r.HandleFunc("/list", handleList)
 	r.HandleFunc("/del/{key}", handleDelete)
 	http.Handle("/", r)
-	err := http.ListenAndServe(":8080", r)
+	err = http.ListenAndServe(":8080", r)
 	log.Fatal(err)
 }
