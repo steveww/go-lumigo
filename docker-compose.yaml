@@ -1,0 +1,19 @@
+version: '3'
+services:
+  redis:
+    image: redis:7.2.2
+    networks:
+      - lumigo
+  go-lumigo:
+    build:
+      context: .
+    image: steveww/go-lumigo:1.0.0
+    depends_on:
+      - redis
+    networks:
+      - lumigo
+    ports:
+      - "8080:8080"
+
+networks:
+  lumigo:
