@@ -5,6 +5,9 @@ KEYS="fee fi fo fum"
 DATA="tracethisdata"
 
 clear
+echo "Home"
+curl "${URL}/"
+
 echo "Adding keys"
 for K in $KEYS
 do

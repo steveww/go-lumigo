@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 	"go.opentelemetry.io/otel"
@@ -34,7 +35,10 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "home")
+	defer span.End()
 	fmt.Fprintln(w, "Key Value Store v1.0.0")
+	time.Sleep(200 * time.Millisecond)
 }
 
 func handleAdd(w http.ResponseWriter, r *http.Request) {
@@ -43,8 +47,7 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 		key := vars["key"]
 		val := vars["value"]
 
-		ctx := context.Background()
-		_, err := rdb.Set(ctx, key, val, 0).Result()
+		_, err := rdb.Set(r.Context(), key, val, 0).Result()
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, "Error %v\n", err)
@@ -59,8 +62,7 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 
 func handleList(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		ctx := context.Background()
-		keys, err := rdb.Keys(ctx, "*").Result()
+		keys, err := rdb.Keys(r.Context(), "*").Result()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "Error %v\n", err)
@@ -80,8 +82,7 @@ func handleFetch(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		key := vars["key"]
 
-		ctx := context.Background()
-		val, err := rdb.Get(ctx, key).Result()
+		val, err := rdb.Get(r.Context(), key).Result()
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
 			fmt.Fprintln(w, "Not found")
@@ -99,8 +100,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		key := vars["key"]
 
-		ctx := context.Background()
-		_, err := rdb.Del(ctx, key).Result()
+		_, err := rdb.Del(r.Context(), key).Result()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "Error %v\n", err)
@@ -155,6 +155,13 @@ func startTracer(token string) error {
 		return fmt.Errorf("error creating exporter %v", err)
 	}
 
+	/*
+		exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+		if err != nil {
+			return fmt.Errorf("error creating exporter %v", err)
+		}
+	*/
+
 	traceProvider := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exporter),
 		sdktrace.WithResource(appResource()),
@@ -176,6 +183,11 @@ func main() {
 	err := startTracer(token)
 	if err != nil {
 		log.Println("Faied to start tracer. You are flying blind. Good luck")
+	} else {
+		// add tracing for Redis
+		if err := redisotel.InstrumentTracing(rdb); err != nil {
+			log.Fatalf("Can not trace Redis: %v\n", err)
+		}
 	}
 
 	r := mux.NewRouter()
