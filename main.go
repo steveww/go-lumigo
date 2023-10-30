@@ -13,6 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -37,6 +38,10 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 func handleHome(w http.ResponseWriter, r *http.Request) {
 	_, span := tracer.Start(r.Context(), "home")
 	defer span.End()
+	span.AddEvent("foo event")
+	span.AddEvent("info", trace.WithAttributes(
+		attribute.String("key", "val"),
+	))
 	fmt.Fprintln(w, "Key Value Store v1.0.0")
 	time.Sleep(200 * time.Millisecond)
 }
@@ -52,6 +57,11 @@ func handleAdd(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprintf(w, "Error %v\n", err)
 		}
+
+		span := trace.SpanFromContext(r.Context())
+		span.AddEvent("foo event")
+		span.SetAttributes(attribute.String("foo", "bar"))
+		time.Sleep(50 * time.Millisecond)
 
 		fmt.Fprintln(w, "OK")
 	} else {
