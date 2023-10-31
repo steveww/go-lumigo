@@ -177,6 +177,7 @@ func startTracer(token string) error {
 		sdktrace.WithResource(appResource()),
 	)
 	otel.SetTracerProvider(traceProvider)
+	// save tracer in global variable
 	tracer = traceProvider.Tracer("tracer")
 
 	return nil
@@ -196,7 +197,7 @@ func main() {
 	} else {
 		// add tracing for Redis
 		if err := redisotel.InstrumentTracing(rdb); err != nil {
-			log.Fatalf("Can not trace Redis: %v\n", err)
+			log.Printf("Can not trace Redis: %v\n", err)
 		}
 	}
 
